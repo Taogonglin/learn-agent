@@ -84,6 +84,42 @@ export interface Reflection {
     notes: string;
     replanned: boolean;
 }
+export interface RunMetrics {
+    llmCalls: number;
+    toolCalls: number;
+    toolFailures: number;
+    rounds: number;
+}
+export interface TraceContext {
+    parentRunId?: string;
+    tags?: Record<string, string>;
+}
+export interface EvalDimensionScores {
+    taskCompletion: number;
+    toolSelectionQuality: number;
+    efficiency: number;
+    finalAnswerQuality: number;
+}
+export interface EvalResult {
+    evaluator: "rules" | "llm_judge" | "online_rules" | "online_llm_judge";
+    score: number;
+    passed: boolean;
+    summary: string;
+    dimensions: EvalDimensionScores;
+    reasons: string[];
+    metadata?: Record<string, unknown>;
+}
+export interface EvalScenario {
+    id: string;
+    input: string;
+    goal: string;
+    expectedTools: string[];
+    forbiddenTools: string[];
+    maxRounds: number;
+    mustContain: string[];
+    mustNotContain: string[];
+    notes?: string;
+}
 export interface Worktree {
     id: string;
     path: string;
@@ -111,6 +147,9 @@ export interface AgentState {
     worktrees: Worktree[];
     toolCalls: ToolCall[];
     toolResponses: ToolResponse[];
+    runId: string;
+    traceContext?: TraceContext;
+    metrics: RunMetrics;
     nextNode?: string;
     stop: boolean;
     [key: string]: unknown;
@@ -122,8 +161,14 @@ export interface ToolCall {
 }
 export interface ToolResponse {
     toolCallId: string;
+    toolName: string;
+    success: boolean;
+    durationMs?: number;
     output: string;
     error?: string;
 }
-export declare function createInitialState(): AgentState;
+export declare function createInitialState(options?: {
+    runId?: string;
+    traceContext?: TraceContext;
+}): AgentState;
 //# sourceMappingURL=index.d.ts.map

@@ -17,7 +17,8 @@ TeamProtocol, // S10: 团队协议
 Goal, // S11: 目标管理
 Worktree, // S12: 工作树隔离
 ToolCall, // S02: 工具调用
-ToolResponse } from "../types/index.js";
+ToolResponse, // S02: 工具响应
+RunMetrics, TraceContext } from "../types/index.js";
 /**
  * Agent 状态类型定义
  * 这是整个系统的核心状态结构，整合了全部 12 节课的核心概念
@@ -123,6 +124,21 @@ export interface AgentStateType {
      * 记录工具执行的结果
      */
     toolResponses: ToolResponse[];
+    /**
+     * 运行 ID
+     * 用于将单次 CLI 请求关联到一条完整 trace
+     */
+    runId: string;
+    /**
+     * 追踪上下文
+     * 保存附加标签和可能的父级 trace 信息
+     */
+    traceContext?: TraceContext;
+    /**
+     * 运行指标
+     * 聚合当前 run 内的 LLM/工具/轮次统计
+     */
+    metrics: RunMetrics;
     /**
      * 控制流：下一个要执行的节点
      * 用于条件路由

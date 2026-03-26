@@ -7,8 +7,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node --esm src/index.ts",
-    "agent": "ts-node --esm src/index.ts"
+    "dev": "npm run build && node dist/index.js",
+    "agent": "npm run build && node dist/index.js",
+    "eval": "npm run build && node dist/evals/runner.js"
   },
   "keywords": [
     "langgraph",

@@ -42,10 +42,10 @@ for (const envVar of requiredEnvVars) {
  *
  * 注意：百炼的 Coding Plan 通常使用特定的应用端点
  */
-export function createLLMClient(): ChatAnthropic {
+export function createNamedLLMClient(modelNameOverride?: string): ChatAnthropic {
   const apiKey = process.env.ANTHROPIC_AUTH_TOKEN;
   const baseURL = process.env.ANTHROPIC_BASE_URL;
-  const modelName = process.env.ANTHROPIC_MODEL || "kimi-k2.5";
+  const modelName = modelNameOverride || process.env.ANTHROPIC_MODEL || "kimi-k2.5";
   const debugEnabled = process.env.DEBUG === "true";
 
   if (debugEnabled) {
@@ -78,6 +78,10 @@ export function createLLMClient(): ChatAnthropic {
   }
 
   return model;
+}
+
+export function createLLMClient(): ChatAnthropic {
+  return createNamedLLMClient();
 }
 
 /**

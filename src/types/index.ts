@@ -104,6 +104,47 @@ export interface Reflection {
   replanned: boolean;
 }
 
+export interface RunMetrics {
+  llmCalls: number;
+  toolCalls: number;
+  toolFailures: number;
+  rounds: number;
+}
+
+export interface TraceContext {
+  parentRunId?: string;
+  tags?: Record<string, string>;
+}
+
+export interface EvalDimensionScores {
+  taskCompletion: number;
+  toolSelectionQuality: number;
+  efficiency: number;
+  finalAnswerQuality: number;
+}
+
+export interface EvalResult {
+  evaluator: "rules" | "llm_judge" | "online_rules" | "online_llm_judge";
+  score: number;
+  passed: boolean;
+  summary: string;
+  dimensions: EvalDimensionScores;
+  reasons: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface EvalScenario {
+  id: string;
+  input: string;
+  goal: string;
+  expectedTools: string[];
+  forbiddenTools: string[];
+  maxRounds: number;
+  mustContain: string[];
+  mustNotContain: string[];
+  notes?: string;
+}
+
 // ===== S12: Worktree Isolation =====
 export interface Worktree {
   id: string;
@@ -153,6 +194,9 @@ export interface AgentState {
   // Tool calls and responses
   toolCalls: ToolCall[];
   toolResponses: ToolResponse[];
+  runId: string;
+  traceContext?: TraceContext;
+  metrics: RunMetrics;
 
   // Control flow
   nextNode?: string;
@@ -170,13 +214,19 @@ export interface ToolCall {
 
 export interface ToolResponse {
   toolCallId: string;
+  toolName: string;
+  success: boolean;
+  durationMs?: number;
   output: string;
   error?: string;
 }
 
 // ===== Initial State Factory =====
-export function createInitialState(): AgentState {
-  return {
+export function createInitialState(options?: {
+  runId?: string;
+  traceContext?: TraceContext;
+}): AgentState {
+  const state: AgentState = {
     messages: [],
     todos: [],
     lastTodoUpdate: 0,
@@ -192,6 +242,19 @@ export function createInitialState(): AgentState {
     worktrees: [],
     toolCalls: [],
     toolResponses: [],
+    runId: options?.runId || `run_${Date.now()}`,
+    metrics: {
+      llmCalls: 0,
+      toolCalls: 0,
+      toolFailures: 0,
+      rounds: 0,
+    },
     stop: false,
   };
+
+  if (options?.traceContext) {
+    state.traceContext = options.traceContext;
+  }
+
+  return state;
 }

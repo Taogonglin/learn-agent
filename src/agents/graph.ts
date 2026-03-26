@@ -21,6 +21,8 @@ import type {
   Worktree,      // S12: 工作树隔离
   ToolCall,      // S02: 工具调用
   ToolResponse,  // S02: 工具响应
+  RunMetrics,
+  TraceContext,
 } from "../types/index.js";
 import { llmNode, toolExecutionNode, shouldContinue } from "./nodes.js";
 
@@ -147,6 +149,24 @@ export interface AgentStateType {
   toolResponses: ToolResponse[];
 
   /**
+   * 运行 ID
+   * 用于将单次 CLI 请求关联到一条完整 trace
+   */
+  runId: string;
+
+  /**
+   * 追踪上下文
+   * 保存附加标签和可能的父级 trace 信息
+   */
+  traceContext?: TraceContext;
+
+  /**
+   * 运行指标
+   * 聚合当前 run 内的 LLM/工具/轮次统计
+   */
+  metrics: RunMetrics;
+
+  /**
    * 控制流：下一个要执行的节点
    * 用于条件路由
    */
@@ -233,6 +253,12 @@ const stateReducers = {
    */
   toolCalls: (x: ToolCall[] = [], y: ToolCall[] = []) => y ?? x,
   toolResponses: (x: ToolResponse[] = [], y: ToolResponse[] = []) => y ?? x,
+  runId: (x = "", y = "") => y ?? x,
+  traceContext: (x?: TraceContext, y?: TraceContext) => y ?? x,
+  metrics: (x: RunMetrics = { llmCalls: 0, toolCalls: 0, toolFailures: 0, rounds: 0 }, y?: Partial<RunMetrics>) => ({
+    ...x,
+    ...(y ?? {}),
+  }),
 
   /**
    * 下一节点归约器：可选替换

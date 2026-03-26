@@ -25,6 +25,7 @@ import type { TodoItem, BackgroundJob, TeamProtocol, Goal } from "../types/index
 import { createLLMWithTools, estimateMessageTokens } from "../llm/client.js";
 import { ALL_TOOLS } from "../tools/index.js";
 import { SkillManager } from "../skills/SkillManager.js";
+import { observability } from "../observability/index.js";
 
 // ===== 常量定义 =====
 
@@ -47,6 +48,18 @@ const KEEP_RECENT_TODOS = 3;
  */
 const NAG_AFTER_ROUNDS = 3;
 
+function serializeMessageContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return "";
+  }
+}
+
 // ===== 核心节点 =====
 
 /**
@@ -66,6 +79,21 @@ const NAG_AFTER_ROUNDS = 3;
  * @returns 状态更新对象，包含新的消息
  */
 export async function llmNode(state: AgentStateType): Promise<Partial<AgentStateType>> {
+  const llmRunId = await observability.startRun({
+    name: "llm_call",
+    runType: "llm",
+    parentRunId: state.runId,
+    inputs: {
+      messageCount: state.messages.length,
+      loadedSkills: state.loadedSkills,
+    },
+    metadata: {
+      node: "llm_call",
+      model: process.env.ANTHROPIC_MODEL || "kimi-k2.5",
+      estimatedTokens: estimateMessageTokens(state.messages),
+    },
+  });
+
   // 创建绑定工具的 LLM 客户端
   // 这样 LLM 知道有哪些工具可用，可以请求调用
   const model = createLLMWithTools(ALL_TOOLS);
@@ -97,12 +125,43 @@ Guidelines:
 
   // 调用 LLM，等待响应
   // 响应可能包含文本内容和工具调用请求
-  const response = await model.invoke(messages);
+  try {
+    const response = await model.invoke(messages);
+    const toolCalls = response.tool_calls || [];
 
-  // 返回状态更新：将 LLM 响应追加到消息列表
-  return {
-    messages: [...state.messages, response],
-  };
+    await observability.endRun(llmRunId, {
+      outputs: {
+        content: serializeMessageContent(response.content),
+        toolCallCount: toolCalls.length,
+        toolNames: toolCalls.map((call) => call.name),
+      },
+      metadata: {
+        node: "llm_call",
+      },
+    });
+
+    // 返回状态更新：将 LLM 响应追加到消息列表
+    return {
+      messages: [...state.messages, response],
+      toolCalls: toolCalls.map((call) => ({
+        id: call.id || "unknown",
+        name: call.name,
+        args: call.args as Record<string, unknown>,
+      })),
+      metrics: {
+        ...state.metrics,
+        llmCalls: state.metrics.llmCalls + 1,
+      },
+    };
+  } catch (error) {
+    await observability.endRun(llmRunId, {
+      error: error instanceof Error ? error.message : String(error),
+      metadata: {
+        node: "llm_call",
+      },
+    });
+    throw error;
+  }
 }
 
 /**
@@ -157,20 +216,49 @@ export async function toolExecutionNode(state: AgentStateType): Promise<Partial<
     return {}; // 没有工具调用需要处理
   }
 
+  const toolExecRunId = await observability.startRun({
+    name: "tool_execution",
+    runType: "chain",
+    parentRunId: state.runId,
+    inputs: {
+      toolCallCount: lastMessage.tool_calls.length,
+    },
+    metadata: {
+      node: "tool_execution",
+    },
+  });
+
   // 提取工具调用列表
   const toolCalls = lastMessage.tool_calls;
 
   // 初始化响应数组和状态副本
   // 使用副本避免直接修改原状态（不可变性原则）
-  const toolResponses: { toolCallId: string; output: string }[] = [];
+  const toolResponses: { toolCallId: string; toolName: string; output: string; success: boolean; durationMs?: number; error?: string }[] = [];
   const loadedSkills: string[] = [...state.loadedSkills];      // S05: 已加载技能
   const backgroundJobs: BackgroundJob[] = [...state.backgroundJobs]; // S08: 后台任务
   const activeProtocols: TeamProtocol[] = [...state.activeProtocols]; // S10: 活跃协议
   const goals: Goal[] = [...state.goals];                      // S11: 目标列表
+  let toolFailureCount = 0;
 
   // 遍历每个工具调用
   for (const call of toolCalls) {
     let output = "";
+    let toolError: string | undefined;
+    let success = true;
+    const startedAt = Date.now();
+    const toolRunId = await observability.startRun({
+      name: `tool:${call.name}`,
+      runType: "tool",
+      parentRunId: toolExecRunId,
+      inputs: {
+        toolName: call.name,
+        args: call.args as Record<string, unknown>,
+      },
+      metadata: {
+        node: "tool_execution",
+        toolName: call.name,
+      },
+    });
 
     try {
       // 根据工具名称执行对应逻辑
@@ -380,14 +468,45 @@ export async function toolExecutionNode(state: AgentStateType): Promise<Partial<
       }
     } catch (error) {
       // 工具执行出错，记录错误信息
-      output = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      toolError = error instanceof Error ? error.message : String(error);
+      output = `Error: ${toolError}`;
+      success = false;
+      toolFailureCount++;
     }
 
+    const durationMs = Date.now() - startedAt;
+
+    const toolRunOutput: {
+      outputs: { output: string; success: boolean };
+      error?: string;
+      metadata: { durationMs: number; toolName: string };
+    } = {
+      outputs: {
+        output,
+        success,
+      },
+      metadata: {
+        durationMs,
+        toolName: call.name,
+      },
+    };
+    if (toolError) {
+      toolRunOutput.error = toolError;
+    }
+    await observability.endRun(toolRunId, toolRunOutput);
+
     // 记录工具响应
-    toolResponses.push({
+    const toolResponse: { toolCallId: string; toolName: string; output: string; success: boolean; durationMs?: number; error?: string } = {
       toolCallId: call.id || "unknown",
+      toolName: call.name,
+      success,
+      durationMs,
       output,
-    });
+    };
+    if (toolError) {
+      toolResponse.error = toolError;
+    }
+    toolResponses.push(toolResponse);
   }
 
   // 将工具响应转换为消息对象
@@ -396,6 +515,15 @@ export async function toolExecutionNode(state: AgentStateType): Promise<Partial<
   );
 
   // 返回完整的状态更新
+  await observability.endRun(toolExecRunId, {
+    outputs: {
+      toolResponses,
+    },
+    metadata: {
+      node: "tool_execution",
+    },
+  });
+
   return {
     messages: [...state.messages, ...responseMessages],
     toolResponses,
@@ -403,6 +531,12 @@ export async function toolExecutionNode(state: AgentStateType): Promise<Partial<
     backgroundJobs,
     activeProtocols,
     goals,
+    metrics: {
+      ...state.metrics,
+      toolCalls: state.metrics.toolCalls + toolCalls.length,
+      toolFailures: state.metrics.toolFailures + toolFailureCount,
+      rounds: state.metrics.rounds + 1,
+    },
   };
 }
 

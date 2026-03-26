@@ -73,6 +73,12 @@ const stateReducers = {
      */
     toolCalls: (x = [], y = []) => y ?? x,
     toolResponses: (x = [], y = []) => y ?? x,
+    runId: (x = "", y = "") => y ?? x,
+    traceContext: (x, y) => y ?? x,
+    metrics: (x = { llmCalls: 0, toolCalls: 0, toolFailures: 0, rounds: 0 }, y) => ({
+        ...x,
+        ...(y ?? {}),
+    }),
     /**
      * 下一节点归约器：可选替换
      */

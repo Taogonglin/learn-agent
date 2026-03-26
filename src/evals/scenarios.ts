@@ -1,0 +1,48 @@
+import type { EvalScenario } from "../types/index.js";
+
+export const DEFAULT_EVAL_SCENARIOS: EvalScenario[] = [
+  {
+    id: "greeting_no_tools",
+    input: "你好，请简单介绍一下你能做什么。",
+    goal: "简单问候时不应调用工具，应直接回答。",
+    expectedTools: [],
+    forbiddenTools: ["bash", "read_file", "write_file", "edit_file", "todo", "task"],
+    maxRounds: 1,
+    mustContain: ["可以帮助", "编程"],
+    mustNotContain: ["[Simulated]"],
+    notes: "用于判断 agent 是否对简单问答过度调用工具。",
+  },
+  {
+    id: "todo_planning",
+    input: "为实现一个登录页面创建 todo 列表，并说明先后顺序。",
+    goal: "多步骤任务应该优先调用 todo 工具。",
+    expectedTools: ["todo"],
+    forbiddenTools: ["write_file", "edit_file"],
+    maxRounds: 3,
+    mustContain: ["todo", "登录"],
+    mustNotContain: [],
+    notes: "用于验证 agent 是否使用结构化规划能力。",
+  },
+  {
+    id: "skill_loading",
+    input: "加载 web-search 技能，并告诉我这个技能适合做什么。",
+    goal: "显式要求加载技能时应该调用 load_skill。",
+    expectedTools: ["load_skill"],
+    forbiddenTools: ["write_file", "edit_file"],
+    maxRounds: 3,
+    mustContain: ["web-search"],
+    mustNotContain: [],
+    notes: "用于验证 agent 是否会按需加载技能而不是硬编码回答。",
+  },
+  {
+    id: "subagent_research",
+    input: "帮我研究一下 TypeScript 项目里为什么需要子代理，并给出简短结论。",
+    goal: "探索性任务可以调用 task 子代理工具。",
+    expectedTools: ["task"],
+    forbiddenTools: ["write_file"],
+    maxRounds: 3,
+    mustContain: ["子代理"],
+    mustNotContain: [],
+    notes: "用于观察 task 工具的选择行为。",
+  },
+];

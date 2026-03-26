@@ -38,10 +38,10 @@ for (const envVar of requiredEnvVars) {
  *
  * 注意：百炼的 Coding Plan 通常使用特定的应用端点
  */
-export function createLLMClient() {
+export function createNamedLLMClient(modelNameOverride) {
     const apiKey = process.env.ANTHROPIC_AUTH_TOKEN;
     const baseURL = process.env.ANTHROPIC_BASE_URL;
-    const modelName = process.env.ANTHROPIC_MODEL || "kimi-k2.5";
+    const modelName = modelNameOverride || process.env.ANTHROPIC_MODEL || "kimi-k2.5";
     const debugEnabled = process.env.DEBUG === "true";
     if (debugEnabled) {
         console.log("[DEBUG] 正在创建 LLM 客户端...");
@@ -68,6 +68,9 @@ export function createLLMClient() {
         console.log("[DEBUG] LLM 客户端创建成功");
     }
     return model;
+}
+export function createLLMClient() {
+    return createNamedLLMClient();
 }
 /**
  * Create LLM client with tool binding

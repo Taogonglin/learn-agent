@@ -26,6 +26,37 @@ npm run agent
 npm run dev
 ```
 
+## 评估与追踪
+
+项目现在内置了两层观测能力：
+
+- `artifacts/traces.jsonl`: 每次 agent run 的结构化 trace
+- `artifacts/evals.jsonl`: 在线/离线评估结果
+
+如果配置了 LangSmith，还会同步上传 trace 和 feedback：
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2...
+LANGSMITH_PROJECT=claude-code-langgraph
+LANGSMITH_EVAL_DATASET=claude-code-langgraph-evals
+APP_ENV=dev
+EVAL_JUDGE_MODEL=kimi-k2.5
+EVAL_ENABLE_ONLINE_JUDGE=false
+```
+
+运行离线评估：
+
+```bash
+npm run eval
+```
+
+如果只想跑规则评估，不跑 LLM judge：
+
+```bash
+EVAL_DISABLE_JUDGE=true npm run eval
+```
+
 ## 项目结构
 
 ```
@@ -180,6 +211,14 @@ npm run dev
 - `ANTHROPIC_AUTH_TOKEN`: API 密钥
 - `ANTHROPIC_BASE_URL`: API 基础 URL
 - `ANTHROPIC_MODEL`: 模型名称 (默认: kimi-k2.5)
+- `LANGSMITH_TRACING`: 是否开启 LangSmith 追踪
+- `LANGSMITH_API_KEY`: LangSmith API Key
+- `LANGSMITH_PROJECT`: LangSmith 项目名
+- `LANGSMITH_EVAL_DATASET`: 离线 eval 同步使用的数据集名称
+- `APP_ENV`: 环境标识
+- `EVAL_JUDGE_MODEL`: LLM judge 使用的模型
+- `EVAL_ENABLE_ONLINE_JUDGE`: 是否在真实 CLI run 后执行在线 LLM judge
+- `EVAL_DISABLE_JUDGE`: 是否在离线 eval 中禁用 LLM judge
 
 ## License
 

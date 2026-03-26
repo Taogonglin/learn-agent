@@ -17,80 +17,9 @@
  * - S11: Autonomous Agents
  * - S12: Worktree Isolation
  */
-import { createAgentGraph } from "./agents/graph.js";
-import { createInitialState } from "./types/index.js";
-import { HumanMessage } from "@langchain/core/messages";
 import * as readline from "readline";
 import * as fs from "fs";
-function renderContentBlock(block) {
-    if (typeof block === "string") {
-        return block;
-    }
-    if (!block || typeof block !== "object") {
-        return "";
-    }
-    const candidate = block;
-    if (typeof candidate.text === "string") {
-        return candidate.text;
-    }
-    if (typeof candidate.content === "string") {
-        return candidate.content;
-    }
-    return "";
-}
-function renderMessageContent(content) {
-    if (typeof content === "string") {
-        return content;
-    }
-    if (Array.isArray(content)) {
-        return content
-            .map((item) => renderContentBlock(item))
-            .filter((item) => item.trim())
-            .join("\n")
-            .trim();
-    }
-    if (content && typeof content === "object") {
-        const rendered = renderContentBlock(content);
-        if (rendered) {
-            return rendered;
-        }
-        try {
-            return JSON.stringify(content, null, 2);
-        }
-        catch {
-            return "";
-        }
-    }
-    return "";
-}
-function isToolResultMessage(content) {
-    return content.startsWith("[") && content.includes("]:");
-}
-function shouldDisplayMessage(msg, content) {
-    if (!content.trim()) {
-        return false;
-    }
-    if (isToolResultMessage(content)) {
-        return true;
-    }
-    if (!msg || typeof msg !== "object") {
-        return false;
-    }
-    const candidate = msg;
-    const constructors = Array.isArray(candidate.id) ? candidate.id : [];
-    if (typeof candidate.getType === "function") {
-        try {
-            return candidate.getType() === "ai";
-        }
-        catch {
-            return false;
-        }
-    }
-    if (typeof candidate.type === "string" && candidate.type.toLowerCase().includes("ai")) {
-        return true;
-    }
-    return constructors.some((part) => String(part).includes("AIMessage"));
-}
+import { executeAgentRun } from "./runtime/runner.js";
 // 手动读取 .env 文件并强制设置环境变量
 try {
     const envContent = fs.readFileSync(".env", "utf-8");
@@ -108,6 +37,7 @@ try {
 catch (e) {
     // .env 文件不存在时忽略
 }
+// readline 负责 CLI 交互式输入；即使通过管道输入，也会复用同一套问答接口。
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -137,8 +67,20 @@ Features:
 
 Type your task or 'quit' to exit.
 `);
+/**
+ * CLI 主循环。
+ *
+ * 生命周期：
+ * 1. 创建 LangGraph agent
+ * 2. 等待用户输入
+ * 3. 将输入注入初始状态并启动 graph.stream()
+ * 4. 按增量流式消费状态更新
+ * 5. 提取新增消息并渲染到终端
+ * 6. 一轮完成后继续等待下一条用户输入
+ */
 async function main() {
-    const graph = createAgentGraph();
+    // 非交互场景下（例如 printf ... | npm run start），stdin 结束后需要停止下一轮 question，
+    // 否则 readline 会在已关闭状态上继续读取并抛 ERR_USE_AFTER_CLOSE。
     let inputClosed = false;
     process.stdin.on("end", () => {
         inputClosed = true;
@@ -150,6 +92,7 @@ async function main() {
         if (inputClosed) {
             break;
         }
+        // rl.question 是 callback 风格，这里包装成 Promise 以便使用 async/await。
         const input = await new Promise((resolve, reject) => {
             try {
                 rl.question("\n🤖 Agent> ", resolve);
@@ -158,6 +101,8 @@ async function main() {
                 reject(error);
             }
         }).catch((error) => {
+            // 管道输入结束后，下一次调用 question 可能触发这个错误；
+            // 将其转成一个受控的 quit 流程，而不是让进程以异常退出。
             if (error?.code === "ERR_USE_AFTER_CLOSE") {
                 inputClosed = true;
                 return "quit";
@@ -176,77 +121,19 @@ async function main() {
         }
         console.log("\n" + "─".repeat(60));
         console.log("Processing...\n");
-        const initialState = createInitialState();
-        initialState.messages.push(new HumanMessage({ content: input }));
         try {
-            const stream = await graph.stream(initialState, {
-                configurable: {
-                    thread_id: `run_${Date.now()}`,
+            const result = await executeAgentRun({
+                input,
+                onDisplayMessage: (message) => {
+                    console.log(message);
                 },
             });
-            let lastContent = "";
-            let messageCount = 0;
-            let roundCount = 0;
-            for await (const update of stream) {
-                // Handle different update types from LangGraph stream
-                // Messages can be in update.llm_call, update.tool_execution, or update.__start__
-                let state = update;
-                if (update.llm_call) {
-                    state = update.llm_call;
-                }
-                else if (update.tool_execution) {
-                    state = update.tool_execution;
-                }
-                else if (update.__start__) {
-                    state = update.__start__;
-                }
-                if (state && typeof state === 'object') {
-                    const agentState = state;
-                    if (agentState.messages && agentState.messages.length > messageCount) {
-                        const newMessages = agentState.messages.slice(messageCount);
-                        const newCount = agentState.messages.length - messageCount;
-                        messageCount = agentState.messages.length;
-                        // 检测是否是新的一轮（收到工具结果后 LLM 再次响应）
-                        const hasToolResult = newMessages.some((msg) => {
-                            const content = msg?.kwargs?.content || msg?.content || '';
-                            return String(content).startsWith('[') && String(content).includes(']:');
-                        });
-                        const hasAssistantResponse = newMessages.some((msg) => {
-                            return msg?.kwargs?.tool_calls || msg?.tool_calls;
-                        });
-                        if (hasToolResult || hasAssistantResponse) {
-                            roundCount++;
-                            if (roundCount > 1) {
-                                console.log(`\n🔄 Agent Loop - Round ${roundCount}`);
-                                console.log("─".repeat(40));
-                            }
-                        }
-                        for (const msg of newMessages) {
-                            // Handle LangChain serialized message format
-                            let content = "";
-                            if (typeof msg === 'object' && msg !== null) {
-                                const m = msg;
-                                // LangChain serialized format: { lc: 1, type: "constructor", id: [...], kwargs: { content: "..." } }
-                                if (m.kwargs && "content" in m.kwargs) {
-                                    content = renderMessageContent(m.kwargs.content);
-                                }
-                                else if ('content' in m) {
-                                    content = renderMessageContent(m.content);
-                                }
-                            }
-                            if (content !== lastContent && shouldDisplayMessage(msg, content)) {
-                                console.log(content);
-                                lastContent = content;
-                            }
-                        }
-                    }
-                    if (agentState.stop) {
-                        console.log("\n[Agent stopped]");
-                        break;
-                    }
-                }
+            if (result.error) {
+                console.error("\n❌ Error:", result.error);
             }
-            console.log(`\n✅ Task completed after ${roundCount} round(s)`);
+            else {
+                console.log(`\n✅ Task completed after ${result.roundCount} round(s)`);
+            }
             console.log("─".repeat(60));
         }
         catch (error) {

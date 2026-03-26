@@ -14,6 +14,7 @@ import { BaseMessage } from "@langchain/core/messages";
  *
  * 注意：百炼的 Coding Plan 通常使用特定的应用端点
  */
+export declare function createNamedLLMClient(modelNameOverride?: string): ChatAnthropic;
 export declare function createLLMClient(): ChatAnthropic;
 /**
  * Create LLM client with tool binding
